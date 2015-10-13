@@ -11,7 +11,7 @@ import (
 	"strings"
 	"strconv"
 	"time"
-	"github.com/bsm/openrtb"
+	"gopkg.in/bsm/openrtb.v1"
 	"math/rand"
 	"os"
 	"os/signal"
@@ -34,7 +34,7 @@ type Agent struct {
 	ExternalId int
 
 	Config map[string]interface{}
-	
+
 	// Fixed price
 	Price float64
 
@@ -109,8 +109,8 @@ func (agent *Agent) StopPacer() {
 
 func (agent *Agent) DoBid(
 	req *openrtb.Request, res *openrtb.Response, ids *map[Key]interface{}) (*openrtb.Response, bool) {
-	
-	
+
+
 	for _, imp := range req.Imp {
 		key := Key{ImpId: *imp.Id, ExtId: agent.ExternalId}
 		if (*ids)[key] == nil {
@@ -142,10 +142,10 @@ type Key struct {
 
 func ExternalIdsFromRequest(req *openrtb.Request) *map[Key]interface{} {
 	ids := make(map[Key]interface{})
-	
+
 	for _, imp := range req.Imp {
 		for _, extId := range imp.Ext["external-ids"].([]interface{}) {
-			// types, types and more types... *sigh*		
+			// types, types and more types... *sigh*
 			key := Key{ImpId: *imp.Id, ExtId: int(extId.(float64))}  // json turns it into a float even though it's an int.
 			creatives := (imp.Ext["creative-indexes"].(map[string]interface{}))[strconv.Itoa(int(extId.(float64)))]
 			ids[key] = creatives.(interface{})
@@ -153,10 +153,10 @@ func ExternalIdsFromRequest(req *openrtb.Request) *map[Key]interface{} {
 	}
 	return &ids
 }
-	
+
 
 func EmptyOneSeatResponse(req *openrtb.Request) *openrtb.Response {
-	
+
 	seat := openrtb.Seatbid{Bid: make([]openrtb.Bid, 0)}
 	seatbid := []openrtb.Seatbid{seat}
 	res := &openrtb.Response{Id: req.Id, Seatbid: seatbid}
@@ -197,11 +197,11 @@ func track(fn http.HandlerFunc, name string) http.HandlerFunc {
 func main() {
 	// http client to pace agents (note that it's pointer)
 	client := &http.Client{}
-	
+
 	// load configuration
 	conf := loadAgentConfig()
 
-	agent := Agent{Name: "my_http_config", Config: conf, ExternalId: 0, Price: 1.0, Period: 30000, BidId: 1}	
+	agent := Agent{Name: "my_http_config", Config: conf, ExternalId: 0, Price: 1.0, Period: 30000, BidId: 1}
 	agent.RegisterAgent(client)
 	agent.StartPacer(client)
 
@@ -211,9 +211,9 @@ func main() {
 		defer r.Body.Close()
 		var ids *map[Key]interface{}
 		enc := json.NewEncoder(w)
-		
+
 		req, err := openrtb.ParseRequest(r.Body)
-				
+
 		if err != nil {
 			log.Println("ERROR", err.Error())
 			w.WriteHeader(204) // respond with 'no bid'
@@ -221,10 +221,10 @@ func main() {
 		}
 
 		log.Println("INFO Received bid request", *req.Id)
-		
+
 		ids = ExternalIdsFromRequest(req)
 		res := EmptyOneSeatResponse(req)
-		
+
 		if res, ok := agent.DoBid(req, res, ids); ok {
 			w.Header().Set("Content-type", "application/json")
 			w.Header().Add("x-openrtb-version", "2.1")
@@ -232,9 +232,9 @@ func main() {
 			enc.Encode(res)
 			return
 		}
-		
+
 		w.WriteHeader(204)
-		
+
 	}, "bidding"))
 
 	go http.ListenAndServe(fmt.Sprintf(":%d", BidderPort), mux)
@@ -267,4 +267,3 @@ func main() {
 		fmt.Println("Leaving...")
 	}
 }
-
