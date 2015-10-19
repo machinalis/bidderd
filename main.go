@@ -1,52 +1,33 @@
 package main
 
 import (
-	"io"
-	"fmt"
-	"log"
-	"net/http"
-	"io/ioutil"
 	"bytes"
 	"encoding/json"
-	"strings"
-	"strconv"
-	"time"
-	"gopkg.in/bsm/openrtb.v1"
+	"fmt"
+	"io"
+	"io/ioutil"
+	"log"
 	"math/rand"
+	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
+	"time"
+
+	"gopkg.in/bsm/openrtb.v1"
 )
 
 const (
-	ACSIp string = "127.0.0.1"
-	ACSPort = 9986
-	BankerIp = "127.0.0.1"
-	BankerPort = 9985
-	BidderPort = 7654
-	BidderWin = 7653
-	BidderEvent = 7652
-	AgentConfigFile = "agentconfig.json"
+	ACSIp           string = "127.0.0.1"
+	ACSPort                = 9986
+	BankerIp               = "127.0.0.1"
+	BankerPort             = 9985
+	BidderPort             = 7654
+	BidderWin              = 7653
+	BidderEvent            = 7652
+	AgentConfigFile        = "agentconfig.json"
 )
-
-
-type Agent struct {
-	Name string
-	ExternalId int
-
-	Config map[string]interface{}
-
-	// Fixed price
-	Price float64
-
-	// For pacing the banking
-	Period, Budget int
-
-	registed bool
-
-	pacer chan bool
-
-	BidId int
-}
 
 func (agent *Agent) RegisterAgent(httpClient *http.Client) {
 	url := fmt.Sprintf("http://%s:%d/v1/agents/%s/config", ACSIp, ACSPort, agent.Name)
@@ -59,7 +40,7 @@ func (agent *Agent) RegisterAgent(httpClient *http.Client) {
 		fmt.Println("ACS registration failed with %s", err)
 		return
 	}
-	agent.registed = true
+	agent.registered = true
 	res.Body.Close()
 }
 
@@ -67,20 +48,20 @@ func (agent *Agent) StartPacer(httpClient *http.Client) {
 
 	// Convert a slice of interface{} to a slice of string.
 	accounts := make([]string, 2)
-	for i, account := range agent.Config["account"].([]interface{}) {
-		accounts[i] = account.(string)
+	for i, account := range agent.Config.Account {
+		accounts[i] = account
 	}
 
 	url := fmt.Sprintf("http://%s:%d/v1/accounts/%s/balance",
 		BankerIp, BankerPort, strings.Join(accounts, ":"))
-	body := fmt.Sprintf("{\"USD/1M\": %d}", agent.Budget)
+	body := fmt.Sprintf("{\"USD/1M\": %d}", agent.Balance)
 	ticker := time.NewTicker(15000 * time.Millisecond)
 	agent.pacer = make(chan bool)
 
 	go func() {
 		for {
 			select {
-			case <- ticker.C:
+			case <-ticker.C:
 				// make this a new go routine?
 				go func() {
 					fmt.Println("Pacing...")
@@ -93,7 +74,7 @@ func (agent *Agent) StartPacer(httpClient *http.Client) {
 					}
 					res.Body.Close()
 				}()
-			case <- agent.pacer:
+			case <-agent.pacer:
 				ticker.Stop()
 				return
 			}
@@ -101,18 +82,15 @@ func (agent *Agent) StartPacer(httpClient *http.Client) {
 	}()
 }
 
-
 func (agent *Agent) StopPacer() {
 	close(agent.pacer)
 }
 
-
 func (agent *Agent) DoBid(
 	req *openrtb.Request, res *openrtb.Response, ids *map[Key]interface{}) (*openrtb.Response, bool) {
 
-
 	for _, imp := range req.Imp {
-		key := Key{ImpId: *imp.Id, ExtId: agent.ExternalId}
+		key := Key{ImpId: *imp.Id, ExtId: agent.Config.ExternalId}
 		if (*ids)[key] == nil {
 			continue
 		}
@@ -123,13 +101,13 @@ func (agent *Agent) DoBid(
 		// the creatives list of the agent config
 
 		cridx := int(creativeList[n].(float64))
-		creative := (agent.Config["creatives"].([]interface{}))[cridx]
-		crid := strconv.Itoa(int(creative.(map[string]interface{})["id"].(float64)))
-		bidId := strconv.Itoa(agent.BidId)
+		creative := agent.Config.Creatives[cridx]
+		crid := strconv.Itoa(creative.Id)
+		bidId := strconv.Itoa(agent.bidId)
 		price := float32(agent.Price)
-		ext := map[string]interface{}{"priority": 1.0, "external-id": agent.ExternalId}
+		ext := map[string]interface{}{"priority": 1.0, "external-id": agent.Config.ExternalId}
 		bid := openrtb.Bid{Id: &bidId, Impid: imp.Id, Crid: &crid, Price: &price, Ext: ext}
-		agent.BidId += 1
+		agent.bidId += 1
 		res.Seatbid[0].Bid = append(res.Seatbid[0].Bid, bid)
 	}
 	return res, len(res.Seatbid[0].Bid) > 0
@@ -146,14 +124,13 @@ func ExternalIdsFromRequest(req *openrtb.Request) *map[Key]interface{} {
 	for _, imp := range req.Imp {
 		for _, extId := range imp.Ext["external-ids"].([]interface{}) {
 			// types, types and more types... *sigh*
-			key := Key{ImpId: *imp.Id, ExtId: int(extId.(float64))}  // json turns it into a float even though it's an int.
+			key := Key{ImpId: *imp.Id, ExtId: int(extId.(float64))} // json turns it into a float even though it's an int.
 			creatives := (imp.Ext["creative-indexes"].(map[string]interface{}))[strconv.Itoa(int(extId.(float64)))]
 			ids[key] = creatives.(interface{})
 		}
 	}
 	return &ids
 }
-
 
 func EmptyOneSeatResponse(req *openrtb.Request) *openrtb.Response {
 
@@ -163,9 +140,6 @@ func EmptyOneSeatResponse(req *openrtb.Request) *openrtb.Response {
 	return res
 
 }
-
-
-type AgentConfig map[string]interface{};
 
 func loadAgentConfig() AgentConfig {
 	var conf AgentConfig
@@ -180,7 +154,6 @@ func loadAgentConfig() AgentConfig {
 	return conf
 }
 
-
 func timeTrack(start time.Time, name string) {
 	elapsed := time.Since(start)
 	log.Printf("%s request took %s", name, elapsed)
@@ -193,15 +166,12 @@ func track(fn http.HandlerFunc, name string) http.HandlerFunc {
 	}
 }
 
-
 func main() {
 	// http client to pace agents (note that it's pointer)
 	client := &http.Client{}
 
 	// load configuration
-	conf := loadAgentConfig()
-
-	agent := Agent{Name: "my_http_config", Config: conf, ExternalId: 0, Price: 1.0, Period: 30000, BidId: 1}
+	agent := LoadAgent(AgentConfigFile)
 	agent.RegisterAgent(client)
 	agent.StartPacer(client)
 
@@ -239,7 +209,6 @@ func main() {
 
 	go http.ListenAndServe(fmt.Sprintf(":%d", BidderPort), mux)
 
-
 	evemux := http.NewServeMux()
 	evemux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
@@ -258,11 +227,10 @@ func main() {
 	})
 	go http.ListenAndServe(fmt.Sprintf(":%d", BidderWin), winmux)
 
-
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, os.Kill)
 	select {
-	case <- c:
+	case <-c:
 		// Implement remove agent from ACS
 		fmt.Println("Leaving...")
 	}
