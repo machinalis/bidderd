@@ -1,158 +1,28 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
-	"math/rand"
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
-	"strings"
 	"time"
 
 	"gopkg.in/bsm/openrtb.v1"
 )
 
 const (
-	ACSIp           string = "127.0.0.1"
-	ACSPort                = 9986
-	BankerIp               = "127.0.0.1"
-	BankerPort             = 9985
-	BidderPort             = 7654
-	BidderWin              = 7653
-	BidderEvent            = 7652
-	AgentConfigFile        = "agentconfig.json"
+	ACSIp       string = "127.0.0.1"
+	ACSPort            = 9986
+	BankerIp           = "127.0.0.1"
+	BankerPort         = 9985
+	BidderPort         = 7654
+	BidderWin          = 7653
+	BidderEvent        = 7652
 )
-
-func (agent *Agent) RegisterAgent(httpClient *http.Client) {
-	url := fmt.Sprintf("http://%s:%d/v1/agents/%s/config", ACSIp, ACSPort, agent.Name)
-	body, _ := json.Marshal(agent.Config)
-	reader := bytes.NewReader(body)
-	req, _ := http.NewRequest("POST", url, reader)
-	req.Header.Add("Accept", "application/json")
-	res, err := httpClient.Do(req)
-	if err != nil {
-		fmt.Println("ACS registration failed with %s", err)
-		return
-	}
-	agent.registered = true
-	res.Body.Close()
-}
-
-func (agent *Agent) StartPacer(httpClient *http.Client) {
-
-	// Convert a slice of interface{} to a slice of string.
-	accounts := make([]string, 2)
-	for i, account := range agent.Config.Account {
-		accounts[i] = account
-	}
-
-	url := fmt.Sprintf("http://%s:%d/v1/accounts/%s/balance",
-		BankerIp, BankerPort, strings.Join(accounts, ":"))
-	body := fmt.Sprintf("{\"USD/1M\": %d}", agent.Balance)
-	ticker := time.NewTicker(15000 * time.Millisecond)
-	agent.pacer = make(chan bool)
-
-	go func() {
-		for {
-			select {
-			case <-ticker.C:
-				// make this a new go routine?
-				go func() {
-					fmt.Println("Pacing...")
-					req, _ := http.NewRequest("POST", url, strings.NewReader(body))
-					req.Header.Add("Accept", "application/json")
-					res, err := httpClient.Do(req)
-					if err != nil {
-						fmt.Println("Balance failed with %s", err)
-						return
-					}
-					res.Body.Close()
-				}()
-			case <-agent.pacer:
-				ticker.Stop()
-				return
-			}
-		}
-	}()
-}
-
-func (agent *Agent) StopPacer() {
-	close(agent.pacer)
-}
-
-func (agent *Agent) DoBid(
-	req *openrtb.Request, res *openrtb.Response, ids *map[Key]interface{}) (*openrtb.Response, bool) {
-
-	for _, imp := range req.Imp {
-		key := Key{ImpId: *imp.Id, ExtId: agent.Config.ExternalId}
-		if (*ids)[key] == nil {
-			continue
-		}
-		creativeList := (*ids)[key].([]interface{})
-		n := rand.Intn(len(creativeList))
-		// json reads numbers as float64, which I guess is a good default
-		// but they are really integers, because it's an index to
-		// the creatives list of the agent config
-
-		cridx := int(creativeList[n].(float64))
-		creative := agent.Config.Creatives[cridx]
-		crid := strconv.Itoa(creative.Id)
-		bidId := strconv.Itoa(agent.bidId)
-		price := float32(agent.Price)
-		ext := map[string]interface{}{"priority": 1.0, "external-id": agent.Config.ExternalId}
-		bid := openrtb.Bid{Id: &bidId, Impid: imp.Id, Crid: &crid, Price: &price, Ext: ext}
-		agent.bidId += 1
-		res.Seatbid[0].Bid = append(res.Seatbid[0].Bid, bid)
-	}
-	return res, len(res.Seatbid[0].Bid) > 0
-}
-
-type Key struct {
-	ImpId string
-	ExtId int
-}
-
-func ExternalIdsFromRequest(req *openrtb.Request) *map[Key]interface{} {
-	ids := make(map[Key]interface{})
-
-	for _, imp := range req.Imp {
-		for _, extId := range imp.Ext["external-ids"].([]interface{}) {
-			// types, types and more types... *sigh*
-			key := Key{ImpId: *imp.Id, ExtId: int(extId.(float64))} // json turns it into a float even though it's an int.
-			creatives := (imp.Ext["creative-indexes"].(map[string]interface{}))[strconv.Itoa(int(extId.(float64)))]
-			ids[key] = creatives.(interface{})
-		}
-	}
-	return &ids
-}
-
-func EmptyOneSeatResponse(req *openrtb.Request) *openrtb.Response {
-
-	seat := openrtb.Seatbid{Bid: make([]openrtb.Bid, 0)}
-	seatbid := []openrtb.Seatbid{seat}
-	res := &openrtb.Response{Id: req.Id, Seatbid: seatbid}
-	return res
-
-}
-
-func loadAgentConfig() AgentConfig {
-	var conf AgentConfig
-	data, err := ioutil.ReadFile(AgentConfigFile)
-	if err != nil {
-		log.Fatal(err)
-	}
-	err = json.Unmarshal(data, &conf)
-	if err != nil {
-		log.Fatal(err)
-	}
-	return conf
-}
 
 func timeTrack(start time.Time, name string) {
 	elapsed := time.Since(start)
@@ -167,21 +37,32 @@ func track(fn http.HandlerFunc, name string) http.HandlerFunc {
 }
 
 func main() {
+	var agentsConfigFile = flag.String("config", "", "Configuration file in JSON.")
+	flag.Parse()
+	if *agentsConfigFile == "" {
+		log.Fatal("You should provide a configuration file.")
+	}
+
 	// http client to pace agents (note that it's pointer)
 	client := &http.Client{}
 
 	// load configuration
-	agent := LoadAgent(AgentConfigFile)
-	agent.RegisterAgent(client)
-	agent.StartPacer(client)
+	agents := LoadAgentsFromFile(*agentsConfigFile)
+	for _, agent := range agents {
+		agent.RegisterAgent(client, ACSIp, ACSPort)
+		agent.StartPacer(client, BankerIp, BankerPort)
+	}
 
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/", track(func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
-		var ids *map[Key]interface{}
-		enc := json.NewEncoder(w)
 
+		var (
+			ok    bool = true
+			tmpOk bool = true
+		)
+		enc := json.NewEncoder(w)
 		req, err := openrtb.ParseRequest(r.Body)
 
 		if err != nil {
@@ -192,10 +73,15 @@ func main() {
 
 		log.Println("INFO Received bid request", *req.Id)
 
-		ids = ExternalIdsFromRequest(req)
+		ids := ExternalIdsFromRequest(req)
 		res := EmptyOneSeatResponse(req)
 
-		if res, ok := agent.DoBid(req, res, ids); ok {
+		for _, agent := range agents {
+			res, tmpOk = agent.DoBid(req, res, ids)
+			ok = tmpOk && ok
+		}
+
+		if ok {
 			w.Header().Set("Content-type", "application/json")
 			w.Header().Add("x-openrtb-version", "2.1")
 			w.WriteHeader(http.StatusOK)
