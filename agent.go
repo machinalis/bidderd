@@ -65,15 +65,17 @@ type Key struct {
 	ExtId int
 }
 
-// Register Agent in the ACS sending a HTTP request to the service on `acs_ip`:`acs_port`
+// Register Agent in the ACS sending a HTTP request to the service on `acsIp`:`acsPort`
 func (agent *Agent) RegisterAgent(
-	httpClient *http.Client, acs_ip string, acs_port int) {
-	url := fmt.Sprintf("http://%s:%d/v1/agents/%s/config", acs_ip, acs_port, agent.Name)
+	httpClient *http.Client, acsIp string, acsPort int) {
+	url := fmt.Sprintf("http://%s:%d/v1/agents/%s/config", acsIp, acsPort, agent.Name)
 	body, _ := json.Marshal(agent.Config)
 	reader := bytes.NewReader(body)
 	req, _ := http.NewRequest("POST", url, reader)
 	req.Header.Add("Accept", "application/json")
 	res, err := httpClient.Do(req)
+	text, _ := ioutil.ReadAll(res.Body)
+	fmt.Printf("Registering... %s that's all? really?\n", text)
 	if err != nil {
 		fmt.Printf("ACS registration failed with %s\n", err)
 		return
@@ -82,14 +84,27 @@ func (agent *Agent) RegisterAgent(
 	res.Body.Close()
 }
 
+func (agent *Agent) UnregisterAgent(
+	httpClient *http.Client, acsIp string, acsPort int) {
+	url := fmt.Sprintf("http://%s:%d/v1/agents/%s/config", acsIp, acsPort, agent.Name)
+	req, _ := http.NewRequest("DELETE", url, bytes.NewBufferString(""))
+	res, err := httpClient.Do(req)
+	if err != nil {
+		fmt.Printf("Unregister failed with %s\n", err)
+		return
+	}
+	agent.registered = false
+	res.Body.Close()
+}
+
 // Starts a go routine which periodically updates the balance on the agents account.
 func (agent *Agent) StartPacer(
-	httpClient *http.Client, banker_ip string, banker_port int) {
+	httpClient *http.Client, bankerIp string, bankerPort int) {
 
 	accounts := agent.Config.Account
 
 	url := fmt.Sprintf("http://%s:%d/v1/accounts/%s/balance",
-		banker_ip, banker_port, strings.Join(accounts, ":"))
+		bankerIp, bankerPort, strings.Join(accounts, ":"))
 	body := fmt.Sprintf("{\"USD/1M\": %d}", agent.Balance)
 	ticker := time.NewTicker(time.Duration(agent.Period) * time.Millisecond)
 	agent.pacer = make(chan bool)
@@ -127,18 +142,27 @@ func (agent *Agent) DoBid(
 
 	for _, imp := range req.Imp {
 		key := Key{ImpId: *imp.Id, ExtId: agent.Config.ExternalId}
+		fmt.Printf("Imp: %s", *imp.Id)
 		if ids[key] == nil {
 			continue
 		}
 		creativeList := ids[key].([]interface{})
+		// pick a random creative
 		n := rand.Intn(len(creativeList))
-		// json reads numbers as float64, but they are really integers, as
-		// it's an index to the creatives list of the agent config
+
+		// JSON reads numbers as float64...
 		cridx := int(creativeList[n].(float64))
+		// ...but this (`cridx` see below) is an index.
 		creative := agent.Config.Creatives[cridx]
 		crid := strconv.Itoa(creative.Id)
+
+		// the `bidId` should be something else,
+		// it is used for tracking the bid,
+		// but we are not tracking anything yet.
 		bidId := strconv.Itoa(agent.bidId)
+
 		price := float32(agent.Price)
+
 		ext := map[string]interface{}{"priority": 1.0, "external-id": agent.Config.ExternalId}
 		bid := openrtb.Bid{Id: &bidId, Impid: imp.Id, Crid: &crid, Price: &price, Ext: ext}
 		agent.bidId += 1
@@ -147,13 +171,16 @@ func (agent *Agent) DoBid(
 	return res, len(res.Seatbid[0].Bid) > 0
 }
 
-func ExternalIdsFromRequest(req *openrtb.Request) map[Key]interface{} {
+func externalIdsFromRequest(req *openrtb.Request) map[Key]interface{} {
+	// This function makes a mappping with a range of type (Impression Id, External Id)
+	// to a slice of "creative indexes" (See the agent configuration "creative").
+	// We use this auxiliary function in `DoBid` to match the `BidRequest` to the
+	// creatives of the agent and create a response.
 	ids := make(map[Key]interface{})
 
 	for _, imp := range req.Imp {
 		for _, extId := range imp.Ext["external-ids"].([]interface{}) {
-			// types, types and more types... *sigh*
-			key := Key{ImpId: *imp.Id, ExtId: int(extId.(float64))} // json turns it into a float even though it's an int.
+			key := Key{ImpId: *imp.Id, ExtId: int(extId.(float64))}
 			creatives := (imp.Ext["creative-indexes"].(map[string]interface{}))[strconv.Itoa(int(extId.(float64)))]
 			ids[key] = creatives.(interface{})
 		}
@@ -161,13 +188,13 @@ func ExternalIdsFromRequest(req *openrtb.Request) map[Key]interface{} {
 	return ids
 }
 
-func EmptyOneSeatResponse(req *openrtb.Request) *openrtb.Response {
-
+func emptyResponseWithOneSeat(req *openrtb.Request) *openrtb.Response {
+	// This function adds a Seat to the Response.
+	// Seat: A buyer entity that uses a Bidder to obtain impressions on its behalf.
 	seat := openrtb.Seatbid{Bid: make([]openrtb.Bid, 0)}
 	seatbid := []openrtb.Seatbid{seat}
 	res := &openrtb.Response{Id: req.Id, Seatbid: seatbid}
 	return res
-
 }
 
 func LoadAgent(filepath string) Agent {

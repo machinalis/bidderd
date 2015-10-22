@@ -57,7 +57,7 @@ func main() {
 
 	mux.HandleFunc("/", track(func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
-
+		fmt.Printf("hello....\n")
 		var (
 			ok    bool = true
 			tmpOk bool = true
@@ -73,8 +73,8 @@ func main() {
 
 		log.Println("INFO Received bid request", *req.Id)
 
-		ids := ExternalIdsFromRequest(req)
-		res := EmptyOneSeatResponse(req)
+		ids := externalIdsFromRequest(req)
+		res := emptyResponseWithOneSeat(req)
 
 		for _, agent := range agents {
 			res, tmpOk = agent.DoBid(req, res, ids)
@@ -118,6 +118,9 @@ func main() {
 	select {
 	case <-c:
 		// Implement remove agent from ACS
+		for _, agent := range agents {
+			agent.UnregisterAgent(client, ACSIp, ACSPort)
+		}
 		fmt.Println("Leaving...")
 	}
 }
