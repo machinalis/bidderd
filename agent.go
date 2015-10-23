@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"log"
 	"math/rand"
@@ -74,10 +73,8 @@ func (agent *Agent) RegisterAgent(
 	req, _ := http.NewRequest("POST", url, reader)
 	req.Header.Add("Accept", "application/json")
 	res, err := httpClient.Do(req)
-	text, _ := ioutil.ReadAll(res.Body)
-	fmt.Printf("Registering... %s that's all? really?\n", text)
 	if err != nil {
-		fmt.Printf("ACS registration failed with %s\n", err)
+		log.Printf("ACS registration failed with %s\n", err)
 		return
 	}
 	agent.registered = true
@@ -90,7 +87,7 @@ func (agent *Agent) UnregisterAgent(
 	req, _ := http.NewRequest("DELETE", url, bytes.NewBufferString(""))
 	res, err := httpClient.Do(req)
 	if err != nil {
-		fmt.Printf("Unregister failed with %s\n", err)
+		log.Printf("Unregister failed with %s\n", err)
 		return
 	}
 	agent.registered = false
@@ -115,12 +112,12 @@ func (agent *Agent) StartPacer(
 			case <-ticker.C:
 				// make this a new go routine?
 				go func() {
-					fmt.Println("Pacing...")
+					log.Println("Pacing...")
 					req, _ := http.NewRequest("POST", url, strings.NewReader(body))
 					req.Header.Add("Accept", "application/json")
 					res, err := httpClient.Do(req)
 					if err != nil {
-						fmt.Printf("Balance failed with %s\n", err)
+						log.Printf("Balance failed with %s\n", err)
 						return
 					}
 					res.Body.Close()
@@ -142,7 +139,6 @@ func (agent *Agent) DoBid(
 
 	for _, imp := range req.Imp {
 		key := Key{ImpId: *imp.Id, ExtId: agent.Config.ExternalId}
-		fmt.Printf("Imp: %s", *imp.Id)
 		if ids[key] == nil {
 			continue
 		}
@@ -208,33 +204,6 @@ func LoadAgent(filepath string) Agent {
 		log.Fatal(err)
 	}
 	return agent
-}
-
-func LoadAgents(r io.Reader) []Agent {
-	agents := make([]Agent, 0, initialCapacity)
-
-	dec := json.NewDecoder(r)
-
-	_, err := dec.Token() // this API is from go1.5.
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	for dec.More() {
-		var a Agent
-		if err := dec.Decode(&a); err == io.EOF {
-			break
-		} else if err != nil {
-			log.Fatal(err)
-		}
-		agents = append(agents, a)
-	}
-
-	_, err = dec.Token()
-	if err != nil {
-		log.Fatal(err)
-	}
-	return agents
 }
 
 func LoadAgentsFromFile(filepath string) []Agent {

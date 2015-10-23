@@ -57,7 +57,6 @@ func main() {
 
 	mux.HandleFunc("/", track(func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
-		fmt.Printf("hello....\n")
 		var (
 			ok    bool = true
 			tmpOk bool = true
@@ -78,7 +77,7 @@ func main() {
 
 		for _, agent := range agents {
 			res, tmpOk = agent.DoBid(req, res, ids)
-			ok = tmpOk && ok
+			ok = tmpOk || ok
 		}
 
 		if ok {
@@ -88,7 +87,7 @@ func main() {
 			enc.Encode(res)
 			return
 		}
-
+		log.Println("No bid.")
 		w.WriteHeader(204)
 
 	}, "bidding"))
