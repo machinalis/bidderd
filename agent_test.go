@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"log"
-	"os"
 	"testing"
 )
 
@@ -66,16 +64,6 @@ func ExampleLoadAgent() {
 	var agent Agent
 	agent = LoadAgent("./agentconfig.json")
 	fmt.Println(agent.Name)
-	// Output: my_http_config
-}
-
-func ExampleLoadAgents() {
-	f, err := os.Open("./agents.json")
-	if err != nil {
-		log.Fatal(err)
-	}
-	agents := LoadAgents(f)
-	fmt.Println(agents[0].Name)
 	// Output: my_http_config
 }
 
