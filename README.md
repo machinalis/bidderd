@@ -19,6 +19,9 @@ agents.
 
 ### Dependencies
 
+* `"gopkg.in/bsm/openrtb.v1"`
+
+
 ### Install
 
 Before installing you should setup your Go environment.
@@ -50,5 +53,8 @@ will add the bid to the **same** seat in the bid response.
 
 This started as an example and copying ideas from the [RTBKIT's Python example][1]
 
-
 [1]: https://github.com/rtbkit/rtbkit/blob/master/rtbkit/examples/py-bidder/http_bid_agent_ex.py  "http_bid_agent_ex.py"
+
+### Future work
+
+The ideas is to have managable agents and be able to dynamically start campaigns.
