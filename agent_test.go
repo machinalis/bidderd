@@ -4,13 +4,29 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"path/filepath"
 	"testing"
+
+	"gopkg.in/bsm/openrtb.v1"
+
+	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/gomega"
 )
+
+// this is from openrtb, useful :-)
+func fixture(fname string, v interface{}) error {
+	data, err := ioutil.ReadFile(filepath.Join("testdata", fname+".json"))
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(data, v)
+}
 
 func TestLoadAndMarshallConfig(t *testing.T) {
 	var agent Agent
 	var buffer bytes.Buffer
-	agent = LoadAgent("./agentconfig.json")
+	agent = LoadAgentsFromFile("./agents.json")[0]
 	body, _ := json.Marshal(agent.Config)
 	var jsonDoc = `{
 					"account": ["hello", "world"],
@@ -60,15 +76,29 @@ func TestLoadAndMarshallConfig(t *testing.T) {
 	}
 }
 
-func ExampleLoadAgent() {
-	var agent Agent
-	agent = LoadAgent("./agentconfig.json")
-	fmt.Println(agent.Name)
-	// Output: my_http_config
-}
-
 func ExampleLoadAgentsFromFile() {
 	agents := LoadAgentsFromFile("./agents.json")
 	fmt.Println(agents[0].Name)
 	// Output: my_http_config
 }
+
+var _ = Describe("Agent", func() {
+	var res *openrtb.Response
+	var req *openrtb.Request
+	var a Agent
+
+	BeforeEach(func() {
+		config := AgentConfig{Creatives: []Creative{Creative{Id: 1}}}
+		a = Agent{Name: "test_agent", Config: config, Price: 1.0, Period: 30000, Balance: 15000}
+		err := fixture("openrtb1_req", &req)
+		res = emptyResponseWithOneSeat(req)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(req.Imp[0].Id).NotTo(BeNil())
+	})
+
+	It("bid should have a price", func() {
+		ids := externalIdsFromRequest(req)
+		a.DoBid(req, res, ids)
+		Expect(*res.Seatbid[0].Bid[0].Price).To(Equal(float32(1.0)))
+	})
+})
