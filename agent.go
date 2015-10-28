@@ -15,9 +15,7 @@ import (
 	"gopkg.in/bsm/openrtb.v1"
 )
 
-const (
-	initialCapacity = 25 // No special reason why it's 25.
-)
+const initialCapacity = 25 // No special reason why it's 25.
 
 type Creative struct {
 	Format string `json:"format"`
@@ -42,6 +40,7 @@ type AgentConfig struct {
 	WinFormat          string           `json:"winFormat"`
 }
 
+// This represents a RTBKIT Agent
 type Agent struct {
 	Name   string      `json:"name"`
 	Config AgentConfig `json:"config"`
@@ -59,7 +58,10 @@ type Agent struct {
 	bidId      int       // unique id for response
 }
 
-type Key struct {
+type creativesKey struct {
+	// This is used to make a mapping between an impression and the
+	// external-id of an agent to the creatives that can be sent to the
+	// exchange for that impression.
 	ImpId string
 	ExtId int
 }
@@ -81,6 +83,7 @@ func (agent *Agent) RegisterAgent(
 	res.Body.Close()
 }
 
+// Removes the agent configuration from the ACS
 func (agent *Agent) UnregisterAgent(
 	httpClient *http.Client, acsIp string, acsPort int) {
 	url := fmt.Sprintf("http://%s:%d/v1/agents/%s/config", acsIp, acsPort, agent.Name)
@@ -130,15 +133,20 @@ func (agent *Agent) StartPacer(
 	}()
 }
 
+// Stops the go routine updating the bank balance.
 func (agent *Agent) StopPacer() {
 	close(agent.pacer)
 }
 
+// Adds to the bid response the bid by the agent. The Bid is added to
+// the only seat of the response. It picks a random creative from
+// the list of creatives from the `Agent.Config.Creative` and places it
+// in the bid.
 func (agent *Agent) DoBid(
-	req *openrtb.Request, res *openrtb.Response, ids map[Key]interface{}) (*openrtb.Response, bool) {
+	req *openrtb.Request, res *openrtb.Response, ids map[creativesKey]interface{}) (*openrtb.Response, bool) {
 
 	for _, imp := range req.Imp {
-		key := Key{ImpId: *imp.Id, ExtId: agent.Config.ExternalId}
+		key := creativesKey{ImpId: *imp.Id, ExtId: agent.Config.ExternalId}
 		if ids[key] == nil {
 			continue
 		}
@@ -167,16 +175,16 @@ func (agent *Agent) DoBid(
 	return res, len(res.Seatbid[0].Bid) > 0
 }
 
-func externalIdsFromRequest(req *openrtb.Request) map[Key]interface{} {
+func externalIdsFromRequest(req *openrtb.Request) map[creativesKey]interface{} {
 	// This function makes a mappping with a range of type (Impression Id, External Id)
 	// to a slice of "creative indexes" (See the agent configuration "creative").
 	// We use this auxiliary function in `DoBid` to match the `BidRequest` to the
 	// creatives of the agent and create a response.
-	ids := make(map[Key]interface{})
+	ids := make(map[creativesKey]interface{})
 
 	for _, imp := range req.Imp {
 		for _, extId := range imp.Ext["external-ids"].([]interface{}) {
-			key := Key{ImpId: *imp.Id, ExtId: int(extId.(float64))}
+			key := creativesKey{ImpId: *imp.Id, ExtId: int(extId.(float64))}
 			creatives := (imp.Ext["creative-indexes"].(map[string]interface{}))[strconv.Itoa(int(extId.(float64)))]
 			ids[key] = creatives.(interface{})
 		}
@@ -193,30 +201,32 @@ func emptyResponseWithOneSeat(req *openrtb.Request) *openrtb.Response {
 	return res
 }
 
-func LoadAgent(filepath string) Agent {
+// Parse a JSON file and return an Agent.
+func LoadAgent(filepath string) (Agent, error) {
 	var agent Agent
 	data, err := ioutil.ReadFile(filepath)
 	if err != nil {
-		log.Fatal(err)
+		return Agent{}, err
 	}
 	err = json.Unmarshal(data, &agent)
 	if err != nil {
-		log.Fatal(err)
+		return Agent{}, err
 	}
-	return agent
+	return agent, nil
 }
 
-func LoadAgentsFromFile(filepath string) []Agent {
+// Parse a JSON file and return a list of Agents.
+func LoadAgentsFromFile(filepath string) ([]Agent, error) {
 	type Agents []Agent
 	var agents Agents
 
 	data, err := ioutil.ReadFile(filepath)
 	if err != nil {
-		log.Fatal(err)
+		return agents, err
 	}
 	err = json.Unmarshal(data, &agents)
 	if err != nil {
-		log.Fatal(err)
+		return agents, err
 	}
-	return agents
+	return agents, nil
 }

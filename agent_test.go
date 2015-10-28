@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"path/filepath"
 	"testing"
 
@@ -26,7 +27,8 @@ func fixture(fname string, v interface{}) error {
 func TestLoadAndMarshallConfig(t *testing.T) {
 	var agent Agent
 	var buffer bytes.Buffer
-	agent = LoadAgentsFromFile("./agents.json")[0]
+	agents, _ := LoadAgentsFromFile("./agents.json")
+	agent = agents[0]
 	body, _ := json.Marshal(agent.Config)
 	var jsonDoc = `{
 					"account": ["hello", "world"],
@@ -77,7 +79,10 @@ func TestLoadAndMarshallConfig(t *testing.T) {
 }
 
 func ExampleLoadAgentsFromFile() {
-	agents := LoadAgentsFromFile("./agents.json")
+	agents, err := LoadAgentsFromFile("./agents.json")
+	if err != nil {
+		log.Fatal(err)
+	}
 	fmt.Println(agents[0].Name)
 	// Output: my_http_config
 }

@@ -16,8 +16,8 @@
             "h": 50,
             "battr" : [ ],
 						"ext" : {
-								"external-ids": [0],
-								"creative-indexes": {"0": [0]}
+								"external-ids": [0, 1],
+								"creative-indexes": {"0": [0], "1":[0]}
 						}
         }
     ],

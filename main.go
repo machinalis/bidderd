@@ -47,7 +47,10 @@ func main() {
 	client := &http.Client{}
 
 	// load configuration
-	agents := LoadAgentsFromFile(*agentsConfigFile)
+	agents, err := LoadAgentsFromFile(*agentsConfigFile)
+	if err != nil {
+		log.Fatal(err)
+	}
 	for _, agent := range agents {
 		agent.RegisterAgent(client, ACSIp, ACSPort)
 		agent.StartPacer(client, BankerIp, BankerPort)
